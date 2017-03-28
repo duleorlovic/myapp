@@ -1,0 +1,20 @@
+/*
+ *= require css/simple-line-icons
+ */
+@font-face {
+  font-family: 'simple-line-icons';
+  src: asset-url('fonts/Simple-Line-Icons.eot?v=2.4.0');
+  src: asset-url('fonts/Simple-Line-Icons.eot?v=2.4.0#iefix')
+  format('embedded-opentype'),
+  asset-url('fonts/Simple-Line-Icons.woff2?v=2.4.0') format('woff2'),
+  asset-url('fonts/Simple-Line-Icons.ttf?v=2.4.0') format('truetype'),
+  asset-url('fonts/Simple-Line-Icons.woff?v=2.4.0') format('woff'), asset-url('fonts/Simple-Line-Icons.svg?v=2.4.0#simple-line-icons') format('svg');
+  font-weight: normal;
+  font-style: normal;
+}
+.with-image {
+  background-image: asset-url("router.jpg");
+}
+.blue {
+  color: blue;
+}
