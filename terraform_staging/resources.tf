@@ -324,13 +324,17 @@ resource "aws_launch_template" "myapp-launch-template" {
 # Any change in the launch template version should force recreation
 resource "terraform_data" "asg_instance_refresh" {
   triggers_replace = {
+    # changes in configuration
     launch_template_version = aws_launch_template.myapp-launch-template.latest_version
+    # changes in cloudinit
+    install_ruby_changed = sha1(jsonencode(local.install_ruby))
+    cloud_init_script_for_app = sha1(jsonencode(local.cloud_init_script_for_app))
   }
 
   provisioner "local-exec" {
     command = <<EOF
-aws autoscaling start-instance-refresh \
-  --auto-scaling-group-name ${aws_autoscaling_group.myapp-autoscaling-group.name}
+      aws autoscaling start-instance-refresh \
+        --auto-scaling-group-name ${aws_autoscaling_group.myapp-autoscaling-group.name}
 EOF
   }
 }
@@ -361,9 +365,20 @@ resource "aws_autoscaling_group" "myapp-autoscaling-group" {
 output "ssh_commands_app" {
   value = <<-HERE_DOC
     ssh-add ${replace(var.path_to_public_key, ".pub", "")}
-    # Instance might not be created (autoscaling_group will create it)
+
+    INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+      --auto-scaling-group-names ${aws_autoscaling_group.myapp-autoscaling-group.name} \
+      --query 'AutoScalingGroups[0].Instances[0].InstanceId' \
+      --output text)
+    echo $INSTANCE_ID
+    aws ec2 describe-instances \
+      --instance-ids "$INSTANCE_ID" \
+      --query 'Reservations[0].Instances[0].PublicIpAddress' \
+      --output text
+
+    # Instance might not be created (autoscaling_group will create it) NOTE: ELB ssh is not enabled by default
     ssh ubuntu@${aws_lb.myapp-alb.dns_name}
-    # You can use capistrano to ssh to first instance
+    # Once it is deployed you can use capistrano to ssh to first instance
     bundle exec cap staging ssh
   HERE_DOC
 }
@@ -372,7 +387,7 @@ output "ssh_commands_app" {
 # #### START OF IAM_PART S3_PART
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket
 resource "aws_s3_bucket" "myapp-s3-bucket" {
-  bucket = "myapp-s3-bucket"
+  bucket = var.s3_bucket_name
   force_destroy = true # this will remove all files when destroying the bucket
 
   tags = {
@@ -500,7 +515,7 @@ resource "random_password" "secret_key_base" {
 locals {
   install_ruby = templatefile("${path.module}/templates/install_ruby.sh.tpl", {
     elasticache-cluster-redis-address = aws_elasticache_cluster.myapp-elasticache-cluster-redis.cache_nodes[0].address
-    ruby_version = var.ruby_version
+    ruby_version = var.ruby_version != null ? var.ruby_version : trimspace(file("${path.root}/../.ruby-version"))
     bundler_version = var.bundler_version
     node_version = var.node_version
   })

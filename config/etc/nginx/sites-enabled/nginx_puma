@@ -1,0 +1,63 @@
+# sudo ln -s /home/ubuntu/myapp/current/config/etc/nginx/sites-enabled/nginx_puma /etc/nginx/sites-enabled
+upstream app {
+  server unix:///home/ubuntu/myapp/current/tmp/sockets/puma.sock;
+}
+
+server {
+  listen 80;
+  # server_name app.myapp.com;
+
+  root /home/ubuntu/myapp/current/public;
+  try_files $uri/index.html $uri @app;
+
+  location @app {
+      proxy_pass http://app;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header Host $http_host;
+      proxy_redirect off;
+  }
+
+  location /cable {
+       proxy_pass http://app;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass_request_headers on;
+
+        proxy_buffering off;
+        proxy_redirect off;
+        break;
+
+  }
+
+  location ^~ /assets/ {
+    gzip_static on;
+    expires max;
+    add_header Cache-Control public;
+  }
+
+  error_page 500 502 504 /500.html;
+  client_max_body_size 10M;
+  keepalive_timeout 10;
+
+  # https://github.com/capistrano/maintenance
+  error_page 503 @503;
+
+  # Return a 503 error if the maintenance page exists.
+  if (-f /home/ubuntu/myapp/current/public/system/maintenance.html) {
+    return 503;
+  }
+
+  location @503 {
+    # Serve static assets if found.
+    if (-f $request_filename) {
+      break;
+    }
+
+    rewrite ^(.*)$ /system/maintenance.html break;
+  }
+}

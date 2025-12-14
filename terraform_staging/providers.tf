@@ -39,7 +39,7 @@ provider "aws" {
 # aws s3api put-bucket-versioning --bucket myapp-capistrano-terraform-state --region us-east-1 --versioning-configuration Status=Enabled
 terraform {
   backend "s3" {
-    bucket         = "myapp-capistrano-terraform-state"
+    bucket         = "myapp-terraform-state-uniq"
     key            = "terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true

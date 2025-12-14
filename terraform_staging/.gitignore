@@ -1,0 +1,4 @@
+myapp_key
+myapp_key.pub
+.terraform/
+terraform.tfvars

@@ -37,13 +37,19 @@ variable "instance_redis_type" {
 }
 
 variable "ruby_version" {
-  default = "3.1.6"
+  type = string
+  default = null
+  description = "By default it ready from ../.ruby-version, but you can override here"
 }
 
 variable "bundler_version" {
-  default = "2.3.27"
+  default = ""
 }
 
 variable "node_version" {
   default = "14.19.0"
+}
+
+variable "s3_bucket_name" {
+  default = "myapp-uniq-bucket-name"
 }

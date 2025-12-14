@@ -64,3 +64,11 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
 end
+
+group :development do
+  gem "capistrano", "~> 3.17", require: false
+  gem "capistrano-rbenv", "~> 2.2"
+  gem "capistrano-rails", "~> 1.6", require: false
+  # Use fork until PR is merged https://github.com/lserman/capistrano-elbas/pull/47
+  gem "elbas", github: "duleorlovic/capistrano-elbas"
+end

@@ -1,9 +1,8 @@
 # Terraform capistrano provision on AWS
 
 This terraform project enable you to deploy using capistrano.
-Quick example what you get (you need ssh access and aws keys elbas keys)
-To deploy on https://staging.myapp.com/ , you should be able to
-ssh first
+To deploy on https://staging.myapp.com/ , you should be able to ssh to both
+worker and app
 ```
 ssh ubuntu@staging-worker.myapp.com
 # ssh through loadbalancer is usually not allowed
@@ -12,7 +11,17 @@ ssh ubuntu@staging-worker.myapp.com
 If you do not have access, ask some of the previous developers to add your
 public key to authorized_keys those servers servers.
 
-## First time provisioning
+You need aws elbas keys
+```
+set -a && source terraform.tfvars && set +a
+export AWS_ACCESS_KEY_ID=$terraform_aws_access_key AWS_SECRET_ACCESS_KEY=$terraform_aws_secret_key AWS_REGION=$terraform_aws_region
+```
+Deploy current branch
+```
+bundle exec cap staging deploy
+```
+
+## First time provision
 
 Start example project
 ```
@@ -21,29 +30,76 @@ cd myapp
 git add . && git commit -am"rails new myapp -d postgresql"
 rails g scaffold posts title body:text
 rails db:migrate
-sed -i '' '$i\root "posts#index"' config/routes.rb
+sed -i "" -e "/^end$/i \\
+  root 'posts#index'\
+" config/routes.rb
 git add . && git commit -am"Add posts"
 ```
 Clone this repo to your project:
 ```
 git clone http://trk.tools/tf/terraform-capistrano-on-aws.git
 rm -rf terraform-capistrano-on-aws/.git
+```
+
+You can rename for specific env
+```
 mv terraform-capistrano-on-aws terraform_staging
 ```
 
+It also uses several files
+```
+# from root of the project
+mkdir -p config/etc/systemd
+mv terraform-staging-capistrano/etc/systemd/puma.server config/etc/systemd
+
+mkdir -p config/etc/nginx/sites-enabled
+mv terraform-staging-capistrano/etc/nginx/sites-enabled/puma.server config/etc/nginx/sites-enabled
+```
+
+Also change default puma config to use socker
+```
+# config/puma.rb
+# Start of code from: https://trk.tools/tf/terraform-capistrano-on-aws/-/blob/main/README.md#first-time-provision
+# Set up socket location used in config/etc/nginx/sites-enabled/nginx_puma
+bind "unix://#{File.expand_path("..", __dir__)}/tmp/sockets/puma.sock"
+# End of code from: https://trk.tools/tf/terraform-capistrano-on-aws/-/blob/main/README.md#first-time-provision
+```
+
+Commit initial terraform scripts
+
+```
+git add . && git commit -am"Add terraform, puma and nginx"
+```
+
 We need `terraform-administrator-access` iam user with AdministratorAccess and
-paste keys to tfvars file
+paste keys to tfvars file (`cp terraform.tfvars_example terraform.tfvars`)
 ```
 # terraform_staging/terraform.tfvars
+# aws root login staging@myapp.com Mypass...
 # https://us-east-1.console.aws.amazon.com/iam/home?region=ap-southeast-1#/users/details/terraform-administrator-access?section=permissions
 terraform_aws_access_key="AK..."
 terraform_aws_secret_key="0Pb..."
 ```
-For the first time you need to create ssh keys
+You can use the same as terraform_aws_secret_key keys but we need to export:
+```
+set -a && source terraform.tfvars && set +a
+export AWS_ACCESS_KEY_ID=$terraform_aws_access_key AWS_SECRET_ACCESS_KEY=$terraform_aws_secret_key AWS_REGION=$terraform_aws_region
+```
+
+For the first time you also need to create ssh keys
 ```
 cd terraform-staging-capistrano
-ssh-keygen -f myapp
+ssh-keygen -f myapp_key
+(Enter)
 ```
+and also we need to create a bucket to store a terraform state. Note that you
+need to use uniq name and also update in `providers.tf` file
+```
+aws s3api create-bucket --bucket myapp-capistrano-terraform-state --region us-east-1
+# optional
+aws s3api put-bucket-versioning --bucket myapp --region us-east-1 --versioning-configuration Status=Enabled
+```
+Now you can run `terraform init`.
 
 ## When server already exists
 
@@ -66,14 +122,79 @@ You can use the same as terraform_aws_secret_key keys but we need to export:
 set -a && source terraform.tfvars && set +a
 export AWS_ACCESS_KEY_ID=$terraform_aws_access_key AWS_SECRET_ACCESS_KEY=$terraform_aws_secret_key AWS_REGION=$terraform_aws_region
 ```
-Create bucket if not already created
-```
-aws s3api create-bucket --bucket myapp --region us-east-1
-# optional
-aws s3api put-bucket-versioning --bucket myapp --region us-east-1 --versioning-configuration Status=Enabled
-```
+
+## Terraform plan
+
+Customize `variables.tf` to match your needs, like ruby and node version.
+You should use uniq name for s3 bucket instead of `myapp-uniq-bucket-name`
 
 ## First time deploy
+
+Install `capistrano` https://github.com/capistrano/capistrano gem and
+`capistrano-rails` and `elbas` gem
+(note that we are using terraform to install puma and rbenv so no need for
+`capistrano-puma` or `capistrano-rbenv` gems, but 
+```
+# Gemfile
+group :development do
+  gem "capistrano", "~> 3.17", require: false
+  gem "capistrano-rbenv", "~> 2.2" # to set correct paths for ruby commands
+  gem "capistrano-rails", "~> 1.6", require: false # to run bundle install
+  # Use fork until PR is merged https://github.com/lserman/capistrano-elbas/pull/47
+  gem "elbas", github: "duleorlovic/capistrano-elbas"
+end
+```
+and
+```
+# Capfile
+require "capistrano/rbenv"
+require "capistrano/rails"
+require "elbas/capistrano"
+```
+and run
+```
+bundle install
+
+# generate config/deploy.rb
+bundle exec cap install
+```
+
+Edit capistrano main configuration based on
+https://trk.tools/rb/capistrano-tips#main-configuration
+
+```
+# config/deploy.rb
+....
+```
+and ssh.rake https://trk.tools/rb/capistrano-tips/-/blob/main/lib/capistrano/tasks/ssh.rake
+
+Server can use ip addresses or put a domain name records on your DNS registrar
+(for example cloudflare can leave Proxy status proxied through CF).
+Note that `myapp-autoscaling-group` should match you auto scaling group name and
+that `18.206.65.85` should match `terraform output ssh_commands_worker`
+```
+# config/deploy/staging.rb
+autoscale "myapp-autoscaling-group" do |_server, i|
+  roles = if i.zero?
+    %w[app web first]
+  else
+    %w[app web]
+  end
+  {
+    user: "ubuntu",
+    roles: roles,
+    ssh_options: {
+      keepalive: true, # https://github.com/capistrano/capistrano/issues/2066#issuecomment-1374911694
+    }
+  }
+end
+server "18.206.65.85",
+  user: "ubuntu",
+  roles: %w[db worker],
+  ssh_options: {
+    keepalive: true, # https://github.com/capistrano/capistrano/issues/2066#issuecomment-1374911694
+  }
+```
 
 Since deploy to web requires assets precompile and it also uses rails
 initializations and check for database columns, we need to deploy to worker role
@@ -120,6 +241,8 @@ tail -f /var/log/syslog
 ```
 
 ### Debug puma service
+
+Main config is in `config/etc/systemd/system/puma.service`
 
 After changing env variables you should redeploy or restart services
 ```
